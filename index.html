@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SFA Fencing Camp Schedule</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --bg: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --border: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+            --accent: #f59e0b;
+            --main-coach-bg: rgba(79, 70, 229, 0.2);
+            --asst-coach-bg: rgba(16, 185, 129, 0.2);
+            --highlight: #ffee00;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            line-height: 1.5;
+            min-height: 100vh;
+            padding: 2rem;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(245, 158, 11, 0.1) 0px, transparent 50%);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            background: linear-gradient(to right, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: var(--text-dim);
+            font-size: 1.1rem;
+            margin-top: 0.5rem;
+        }
+
+        .search-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .search-container input {
+            width: 100%;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 0.75rem 1rem 0.75rem 2.5rem;
+            border-radius: 0.75rem;
+            color: white;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.2s;
+            backdrop-filter: blur(8px);
+        }
+
+        .search-container input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+        }
+
+        .search-container svg {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-dim);
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            background: var(--card-bg);
+            padding: 0.4rem;
+            border-radius: 1rem;
+            width: max-content;
+            border: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+        }
+
+        .tab {
+            padding: 0.6rem 1.5rem;
+            border-radius: 0.6rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+            color: var(--text-dim);
+        }
+
+        .tab:hover {
+            color: white;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+        }
+
+        .schedule-wrapper {
+            background: var(--card-bg);
+            border-radius: 1.5rem;
+            border: 1px solid var(--border);
+            overflow: auto;
+            backdrop-filter: blur(12px);
+            max-height: 75vh;
+            position: relative;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+            border-right: 1px solid var(--border);
+            min-width: 140px;
+        }
+
+        th {
+            background: #1e293b;
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            font-weight: 600;
+            color: var(--text-dim);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        th:first-child, td:first-child {
+            position: sticky;
+            left: 0;
+            z-index: 30;
+            background: #1e293b;
+            min-width: 100px;
+            font-weight: 600;
+            color: var(--primary);
+            border-right: 2px solid var(--border);
+        }
+
+        td:first-child {
+            background: var(--card-bg);
+            z-index: 10;
+        }
+
+        .assignment {
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: all 0.3s;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            word-break: break-all;
+        }
+
+        .assignment.main-coach {
+            background: var(--main-coach-bg);
+            color: #a5b4fc;
+        }
+
+        .assignment.asst-coach {
+            background: var(--asst-coach-bg);
+            color: #6ee7b7;
+        }
+
+        .assignment.highlighted {
+            background: var(--accent);
+            color: #000;
+            transform: scale(1.05);
+            box-shadow: 0 0 15px var(--accent);
+            z-index: 5;
+        }
+
+        .assignment.dimmed {
+            opacity: 0.2;
+            filter: grayscale(0.8);
+        }
+
+        .empty {
+            color: rgba(255, 255, 255, 0.05);
+            font-size: 0.75rem;
+            font-style: italic;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        footer {
+            margin-top: 2rem;
+            display: flex;
+            justify-content: space-between;
+            color: var(--text-dim);
+            font-size: 0.875rem;
+        }
+
+        .legend {
+            display: flex;
+            gap: 1.5rem;
+            align-items: center;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        @media (max-width: 768px) {
+            header { flex-direction: column; align-items: flex-start; }
+            .search-container { max-width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>Camp Schedule</h1>
+                <p class="subtitle">Aug Shenzhen Fencing Camp • Packed Generation</p>
+            </div>
+        <div class="controls">
+            <div class="search-container">
+                <input type="text" id="studentSearch" placeholder="Search student..." oninput="handleSearch()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
+                </svg>
+            </div>
+            <div class="edit-controls">
+                <button id="editToggle" class="btn btn-secondary" onclick="toggleEditMode()">Edit Mode: Off</button>
+                <button id="downloadBtn" class="btn btn-primary" onclick="downloadJSON()" style="display: none;">Export JSON</button>
+                <button id="resetBtn" class="btn btn-secondary" onclick="resetToOriginal()" title="Reset all manual edits" style="margin-left:5px;">Reset</button>
+            </div>
+        </div>
+    </header>
+
+    <style>
+        /* Add button styles */
+        .btn {
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn-primary { background: var(--accent); color: #000; }
+        .btn-secondary { background: rgba(255,255,255,0.05); color: var(--text-dim); border: 1px solid rgba(255,255,255,0.1); }
+        .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        .btn-secondary:hover { background: rgba(255,255,255,0.1); color: var(--text-main); }
+        
+        /* Edit mode states */
+        .assignment.editable { cursor: pointer; border: 1px dashed rgba(255,255,255,0.3); }
+        .assignment.selected { 
+            outline: 3px solid #f59e0b; 
+            outline-offset: 2px;
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+            transform: scale(1.05);
+            z-index: 10;
+        }
+        .empty.droppable { 
+            cursor: pointer; 
+            background: rgba(255,255,255,0.05) !important; 
+            border: 1px dashed rgba(255,255,255,0.2) !important;
+        }
+        .empty.droppable:hover { background: rgba(255,255,255,0.1) !important; }
+
+        .controls { display: flex; gap: 1.5rem; align-items: center; }
+        .edit-controls { display: flex; gap: 0.5rem; align-items: center; }
+    </style>
+
+    <main>
+        <div class="tabs" id="dayTabs">
+            <!-- Tabs will be injected here -->
+        </div>
+
+        <div class="schedule-wrapper">
+                <table id="scheduleTable">
+                    <thead id="tableHead">
+                        <!-- Headers will be injected here -->
+                    </thead>
+                    <tbody id="tableBody">
+                        <!-- Content will be injected here -->
+                    </tbody>
+                </table>
+        </div>
+    </main>
+
+    <script>
+        let scheduleData = null;
+        let originalData = null; // For reset
+        let currentDayIdx = 0;
+        let searchQuery = "";
+        
+        // Edit Mode States
+        let isEditMode = false;
+        let isAuthenticated = false;
+        let selectedAssignment = null; // { coach, day, slot, data }
+
+        async function loadData() {
+            try {
+                // 1. Check if we have an edited version in localStorage
+                const localKey = `sfa_schedule_prod`;
+                const localData = localStorage.getItem(localKey);
+                
+                if (localData) {
+                    console.log(`Loading schedule from LocalStorage`);
+                    scheduleData = JSON.parse(localData);
+                    // Fetch original to allow "Reset" later
+                    const url = `schedule.json?t=${Date.now()}`;
+                    const resp = await fetch(url);
+                    if (resp.ok) originalData = await resp.json();
+                    renderUI();
+                    return;
+                }
+
+                // 2. Otherwise load from server
+                const url = `schedule.json?t=${Date.now()}`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Could not load ${url}`);
+                scheduleData = await response.json();
+                originalData = JSON.parse(JSON.stringify(scheduleData)); // Deep copy
+                renderUI();
+            } catch (err) {
+                console.error(err);
+                document.getElementById('tableBody').innerHTML = `<tr><td colspan="10" style="padding: 3rem; color: #ef4444;">Error: ${err.message}. Make sure schedule.json exists.</td></tr>`;
+            }
+        }
+
+        function saveToLocal() {
+            const localKey = `sfa_schedule_prod`;
+            localStorage.setItem(localKey, JSON.stringify(scheduleData));
+        }
+
+        function resetToOriginal() {
+            if (!confirm("Are you sure you want to clear all manual edits and revert to the original generated schedule?")) return;
+            localStorage.removeItem(`sfa_schedule_prod`);
+            loadData();
+        }
+
+        function toggleEditMode() {
+            if (!isAuthenticated && !isEditMode) {
+                const pwd = prompt("Enter Admin Password to enable editing:");
+                if (pwd === 'admin123') {
+                    isAuthenticated = true;
+                } else {
+                    alert("Incorrect password!");
+                    return;
+                }
+            }
+
+            isEditMode = !isEditMode;
+            selectedAssignment = null;
+            const btn = document.getElementById('editToggle');
+            const saveBtn = document.getElementById('downloadBtn');
+            
+            if (isEditMode) {
+                btn.textContent = "Edit Mode: ON";
+                btn.classList.remove('btn-secondary');
+                btn.classList.add('btn-primary');
+                saveBtn.style.display = 'inline-block';
+            } else {
+                btn.textContent = "Edit Mode: Off";
+                btn.classList.add('btn-secondary');
+                btn.classList.remove('btn-primary');
+                saveBtn.style.display = 'none';
+            }
+            renderTable();
+        }
+
+        function handleSlotClick(coach, day, slotIdx) {
+            if (!isEditMode) return;
+
+            const targetAssignment = scheduleData.assignments.find(a => 
+                a.coach === coach && a.day === day && a.slot === slotIdx
+            );
+
+            if (targetAssignment) {
+                // If we clicked a session, select it
+                if (selectedAssignment && selectedAssignment.data === targetAssignment) {
+                    selectedAssignment = null; // Deselect
+                } else {
+                    selectedAssignment = { coach, day, slot: slotIdx, data: targetAssignment };
+                }
+                renderTable();
+            } else if (selectedAssignment) {
+                // If we clicked an empty slot and have a selection, try to MOVE
+                attemptMove(selectedAssignment, coach, day, slotIdx);
+            }
+        }
+
+        function attemptMove(source, targetCoach, targetDay, targetSlot) {
+            const kid = source.data.kid;
+
+            // 1. Check if Target Coach is busy
+            const coachBusy = scheduleData.assignments.some(a => 
+                a.coach === targetCoach && a.day === targetDay && a.slot === targetSlot
+            );
+            if (coachBusy) {
+                alert(`Conflict: Coach ${targetCoach} is already busy in this slot.`);
+                return;
+            }
+
+            // 2. Check if Kid is busy
+            const kidBusy = scheduleData.assignments.some(a => 
+                a.kid === kid && a.day === targetDay && a.slot === targetSlot
+            );
+            if (kidBusy) {
+                alert(`Conflict: Student ${kid} already has another class at this time.`);
+                return;
+            }
+
+            // 3. Move Valid -> Update Data
+            source.data.coach = targetCoach;
+            source.data.day = targetDay;
+            source.data.slot = targetSlot;
+            
+            selectedAssignment = null;
+            saveToLocal(); // Persist change
+            renderTable();
+        }
+
+        function downloadJSON() {
+            const blob = new Blob([JSON.stringify(scheduleData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `schedule_${currentVersion}_edited.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            alert("Downloaded! Replace your .json file with this one to save permanently.");
+        }
+
+        function renderUI() {
+            renderTabs();
+            renderTable();
+        }
+
+        function renderTabs() {
+            const container = document.getElementById('dayTabs');
+            container.innerHTML = scheduleData.days.map((day, idx) => `
+                <div class="tab ${idx === currentDayIdx ? 'active' : ''}" onclick="setDay(${idx})">
+                    ${day}
+                </div>
+            `).join('');
+        }
+
+        function setDay(idx) {
+            currentDayIdx = idx;
+            renderTabs();
+            renderTable();
+        }
+
+        function handleSearch() {
+            searchQuery = document.getElementById('studentSearch').value.toLowerCase().trim();
+            renderTable();
+        }
+
+        function renderTable() {
+            const head = document.getElementById('tableHead');
+            const body = document.getElementById('tableBody');
+
+            // Header: Time + Coaches
+            head.innerHTML = `<tr><th>Time</th>` + scheduleData.coaches.map(c => `<th>${c}</th>`).join('') + `</tr>`;
+
+            // Body
+            let html = "";
+            scheduleData.slots.forEach((slot, slotIdx) => {
+                html += `<tr>`;
+                html += `<td>${slot}</td>`;
+                
+                scheduleData.coaches.forEach(coach => {
+                    const assignment = scheduleData.assignments.find(a => 
+                        a.coach === coach && a.day === currentDayIdx && a.slot === slotIdx
+                    );
+
+                    if (assignment) {
+                        const isMatch = searchQuery && assignment.kid.toLowerCase().includes(searchQuery);
+                        const isDimmed = !isEditMode && searchQuery && !isMatch;
+                        const isSelected = selectedAssignment && selectedAssignment.data === assignment;
+                        const cssClass = assignment.coach_type === '主教练' ? 'main-coach' : 'asst-coach';
+                        
+                        html += `
+                            <td onclick="handleSlotClick('${coach}', ${currentDayIdx}, ${slotIdx})">
+                                <div class="assignment ${cssClass} ${isMatch ? 'highlighted' : ''} ${isDimmed ? 'dimmed' : ''} ${isEditMode ? 'editable' : ''} ${isSelected ? 'selected' : ''}">
+                                    ${assignment.kid}
+                                </div>
+                            </td>
+                        `;
+                    } else {
+                        html += `
+                            <td onclick="handleSlotClick('${coach}', ${currentDayIdx}, ${slotIdx})">
+                                <span class="empty ${isEditMode && selectedAssignment ? 'droppable' : ''}">-</span>
+                            </td>
+                        `;
+                    }
+                });
+                html += `</tr>`;
+            });
+            body.innerHTML = html;
+        }
+
+        loadData('v2');
+    </script>
+</body>
+</html>
