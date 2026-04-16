@@ -11,10 +11,16 @@ import argparse
 import sys
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────
-EXCEL_FILE = "Aug_shenzhen.xlsx"
+EXCEL_FILE = "input_data/Aug_shenzhen.xlsx"
 SHEET_NAME = "input_data"
+OUTPUT_DIR = "output"
 NUM_DAYS = 6
 DAY_LABELS = [f"Day{i}" for i in range(1, NUM_DAYS + 1)]
+
+# Ensure output directory exists
+import os
+if not os.path.exists(OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR)
 
 # Sessions: (label, start_time_str, num_20min_slots)
 SESSIONS = [
@@ -154,8 +160,10 @@ def read_input():
     print(f"Detected Coaches: Main={MAIN_COACHES}, Asst={ASST_COACHES}")
     return requests
 
-def read_schedule_from_excel(filename="SummerCamp_Schedule.xlsx"):
+def read_schedule_from_excel(filename=None):
     """Parse SummerCamp_Schedule.xlsx (Day1-Day6 tabs) back into global schedule dict."""
+    if filename is None:
+        filename = os.path.join(OUTPUT_DIR, "SummerCamp_Schedule.xlsx")
     global schedule, kid_assignments, kid_busy
     import openpyxl
     wb = openpyxl.load_workbook(filename, data_only=True)
@@ -353,7 +361,9 @@ def build_schedule(shuffle_slots=False):
     return requests
 
 # ─── OUTPUT ─────────────────────────────────────────────────────────────
-def write_coach_csv(filename="schedule_by_coach.csv"):
+def write_coach_csv(filename=None):
+    if filename is None:
+        filename = os.path.join(OUTPUT_DIR, "schedule_by_coach.csv")
     with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
         for coach in MAIN_COACHES + ASST_COACHES:
@@ -368,7 +378,9 @@ def write_coach_csv(filename="schedule_by_coach.csv"):
                     row.append(coach_schedule.get((day_idx, slot_idx), ""))
                 writer.writerow(row)
 
-def write_kid_csv(filename="schedule_by_kid.csv"):
+def write_kid_csv(filename=None):
+    if filename is None:
+        filename = os.path.join(OUTPUT_DIR, "schedule_by_kid.csv")
     with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
         writer.writerow(["Kid Name", "Day", "Time", "Coach", "Coach Type"])
@@ -378,7 +390,9 @@ def write_kid_csv(filename="schedule_by_kid.csv"):
                 ctype = "主教练" if coach in MAIN_COACHES else "助理教练"
                 writer.writerow([kid, DAY_LABELS[day_idx], TIME_SLOTS[slot_idx], coach, ctype])
 
-def write_summary_csv(requests, filename="schedule_summary.csv"):
+def write_summary_csv(requests, filename=None):
+    if filename is None:
+        filename = os.path.join(OUTPUT_DIR, "schedule_summary.csv")
     with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
         writer.writerow(["Kid Name", "Coach Type", "Requested Coach", "Expected", "Assigned", "Coaches", "Status"])
@@ -402,7 +416,9 @@ def write_comparison_csv(requests, a1, a2, filename="schedule_comparison.csv"):
             v2_s = fmt(a2.get(kid, []), ctype)
             writer.writerow([kid, ctype, v1_s, v2_s, "Same" if v1_s == v2_s else "Shifted"])
 
-def write_json(filename="schedule.json"):
+def write_json(filename=None):
+    if filename is None:
+        filename = os.path.join(OUTPUT_DIR, "schedule.json")
     import json
     data = {"coaches": MAIN_COACHES + ASST_COACHES, "days": DAY_LABELS, "slots": TIME_SLOTS, "assignments": []}
     for coach in data["coaches"]:
@@ -412,9 +428,11 @@ def write_json(filename="schedule.json"):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def write_excel(filename="SummerCamp_Schedule.xlsx"):
+def write_excel(filename=None):
     """Write a multi-tab Excel file with one sheet per day (Day1–Day6).
     Each sheet: rows = time slots, columns = coaches."""
+    if filename is None:
+        filename = os.path.join(OUTPUT_DIR, "SummerCamp_Schedule.xlsx")
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     
@@ -496,9 +514,11 @@ def write_excel(filename="SummerCamp_Schedule.xlsx"):
     wb.save(filename)
     print(f"  Excel saved: {filename}")
 
-def write_coach_excel(filename="schedule_by_coach.xlsx"):
+def write_coach_excel(filename=None):
     """Write a multi-tab Excel where each tab is one coach.
     Columns = Day1 to Day6, Rows = Time Slots."""
+    if filename is None:
+        filename = os.path.join(OUTPUT_DIR, "schedule_by_coach.xlsx")
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     
@@ -655,11 +675,11 @@ if __name__ == "__main__":
         requests = build_schedule(shuffle_slots=False)
         validate()
         
-        write_json("schedule.json")
-        write_coach_csv("schedule_by_coach.csv") # legacy CSV still useful
-        write_kid_csv("schedule_by_kid.csv")
-        write_summary_csv(requests, "schedule_summary.csv")
-        write_excel("SummerCamp_Schedule.xlsx")
+        write_json()
+        write_coach_csv() # legacy CSV still useful
+        write_kid_csv()
+        write_summary_csv(requests)
+        write_excel()
         print("\nStep 1 Complete! You can now edit SummerCamp_Schedule.xlsx if needed.")
 
     if args.step2:
@@ -668,12 +688,12 @@ if __name__ == "__main__":
         requests = read_input()
         
         # Read the (potentially edited) schedule back from Excel
-        read_schedule_from_excel("SummerCamp_Schedule.xlsx")
+        read_schedule_from_excel()
         
         # Sync the JSON and CSVs from the current state (parsed from Excel)
-        write_json("schedule.json")
-        write_coach_excel("schedule_by_coach.xlsx")
-        write_kid_csv("schedule_by_kid.csv")
+        write_json()
+        write_coach_excel()
+        write_kid_csv()
         
         # Final validation against input
         validate_against_input(requests)
