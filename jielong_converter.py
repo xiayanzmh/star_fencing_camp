@@ -1,6 +1,7 @@
 import openpyxl
 import re
 import os
+import argparse
 from openpyxl import Workbook
 
 # CONFIG
@@ -49,7 +50,7 @@ def map_coach_request(text):
     if "王" in text: return "王助理教练"
     return None
 
-def parse_jielong():
+def parse_jielong(max_main_lessons=None):
     if not os.path.exists(INPUT_FILE):
         print(f"Error: {INPUT_FILE} not found.")
         return
@@ -140,6 +141,13 @@ def parse_jielong():
         # Fallback if no specific count found but name exists
         if not unique_reqs and names:
             unique_reqs.append({'count': 6, 'type': '主教练', 'request': None})
+
+        # Apply Max Main Lessons restriction if set
+        if max_main_lessons:
+            for req in unique_reqs:
+                if req['type'] == '主教练' and req['count'] > max_main_lessons:
+                    print(f"  NOTICE: Capping {names[0] if names else 'unknown'} (主教练) from {req['count']} to {max_main_lessons} sessions.")
+                    req['count'] = max_main_lessons
         
         # If "各" is present, we apply the requests to ALL names
         # Otherwise, if we have multiple names and multiple requests, it's tricky.
@@ -213,4 +221,21 @@ def parse_jielong():
     print(f"Successfully converted {len(records)} records to {OUTPUT_FILE}")
 
 if __name__ == "__main__":
-    parse_jielong()
+    parser = argparse.ArgumentParser(description="Convert jielong.xlsx to structured format")
+    parser.add_argument("--max-main", type=int, help="Max lessons allowed for a Main Coach request")
+    args = parser.parse_args()
+
+    m_main = args.max_main
+    if m_main is None:
+        try:
+            val = input("Enter max class_num for coach_type = '主教练' (default 4, press Enter to skip): ").strip()
+            if val:
+                m_main = int(val)
+            else:
+                m_main = 4 # Default if they just press enter
+        except (ValueError, EOFError):
+            m_main = 4
+            print("Using default 4.")
+
+    print(f"\n>>> Converting jielong with MAX_MAIN_LESSONS={m_main} <<<")
+    parse_jielong(max_main_lessons=m_main)

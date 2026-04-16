@@ -12,8 +12,9 @@ import sys
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────
 EXCEL_FILE = "input_data/Aug_shenzhen.xlsx"
-SHEET_NAME = "input_data"
+SHEET_NAME = "input_data_fix"
 OUTPUT_DIR = "output"
+DEFAULT_MAX_MAIN_LESSONS = 4
 NUM_DAYS = 6
 DAY_LABELS = [f"Day{i}" for i in range(1, NUM_DAYS + 1)]
 
@@ -108,7 +109,7 @@ def reset_state():
     kid_busy = defaultdict(set)
 
 # ─── READ INPUT ─────────────────────────────────────────────────────────
-def read_input():
+def read_input(max_main=DEFAULT_MAX_MAIN_LESSONS):
     """Parse the Excel input_data sheet. Returns list of request dicts."""
     global MAIN_COACHES, ASST_COACHES
     wb = openpyxl.load_workbook(EXCEL_FILE, data_only=True)
@@ -136,8 +137,19 @@ def read_input():
         c_type = str(coach_type).strip() if coach_type else None
         
         if c_req:
-            if c_type == "主教练": detected_main.add(c_req)
-            elif c_type == "助理教练": detected_asst.add(c_req)
+            if c_type == "主教练": 
+                detected_main.add(c_req)
+                # Apply lesson cap
+                if class_num > max_main:
+                    print(f"  NOTICE: Capping {name} ({c_type}) from {class_num} to {max_main} sessions.")
+                    class_num = max_main
+            elif c_type == "助理教练": 
+                detected_asst.add(c_req)
+        elif c_type == "主教练":
+            # Apply lesson cap even if no specific coach requested
+            if class_num > max_main:
+                print(f"  NOTICE: Capping {name} ({c_type}) from {class_num} to {max_main} sessions.")
+                class_num = max_main
         
         # Parse time_preference
         t_pref_indices = None
@@ -302,8 +314,8 @@ def find_best_slots_flexible_v2(kid, coach_list, num_needed, shuffle_slots=False
     return None
 
 # ─── MAIN SCHEDULING LOGIC ─────────────────────────────────────────────
-def build_schedule(shuffle_slots=False):
-    requests = read_input()
+def build_schedule(shuffle_slots=False, max_main=DEFAULT_MAX_MAIN_LESSONS):
+    requests = read_input(max_main=max_main)
     reset_state()
     
     main_requests = [r for r in requests if r['coach_type'] == '主教练']
@@ -662,6 +674,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fencing Camp Schedule Generator")
     parser.add_argument("--step1", action="store_true", help="Generate initial SummerCamp_Schedule.xlsx from Aug_shenzhen.xlsx")
     parser.add_argument("--step2", action="store_true", help="Generate final coach/kid reports from SummerCamp_Schedule.xlsx (respects manual edits)")
+    parser.add_argument("--max-main", type=int, default=DEFAULT_MAX_MAIN_LESSONS, help=f"Max lessons allowed for a Main Coach request (default: {DEFAULT_MAX_MAIN_LESSONS})")
     args = parser.parse_args()
 
     random.seed(42)
@@ -672,20 +685,16 @@ if __name__ == "__main__":
 
     if args.step1:
         print("\n>>> STEP 1: GENERATING INITIAL SCHEDULE <<<")
-        requests = build_schedule(shuffle_slots=False)
+        requests = build_schedule(shuffle_slots=False, max_main=args.max_main)
         validate()
         
-        write_json()
-        write_coach_csv() # legacy CSV still useful
-        write_kid_csv()
-        write_summary_csv(requests)
         write_excel()
         print("\nStep 1 Complete! You can now edit SummerCamp_Schedule.xlsx if needed.")
 
     if args.step2:
         print("\n>>> STEP 2: GENERATING FINAL REPORTS FROM EXCEL <<<")
         # We still need to read input to know requested counts and coach types
-        requests = read_input()
+        requests = read_input(max_main=args.max_main)
         
         # Read the (potentially edited) schedule back from Excel
         read_schedule_from_excel()
@@ -693,9 +702,11 @@ if __name__ == "__main__":
         # Sync the JSON and CSVs from the current state (parsed from Excel)
         write_json()
         write_coach_excel()
+        write_coach_csv()
         write_kid_csv()
+        write_summary_csv(requests)
         
         # Final validation against input
         validate_against_input(requests)
         validate() # print load summary
-        print("\nStep 2 Complete! Generated schedule_by_coach.xlsx, schedule_by_kid.csv and updated schedule.json")
+        print("\nStep 2 Complete! Generated reports in output/ folder.")
