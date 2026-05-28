@@ -24,10 +24,12 @@ if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
 # Sessions: (label, start_time_str, num_20min_slots)
+# Superset of all coach types — individual availability is enforced separately.
 SESSIONS = [
-    ("8:00-10:00AM", "08:00", 6),
-    ("1:00-2:00PM",  "13:00", 3),
-    ("4:00-6:00PM",  "16:00", 6),
+    ("8:00-10:00AM", "08:00", 6),   # 08:00, 08:20, 08:40, 09:00, 09:20, 09:40
+    ("12:50-1:30PM", "12:50", 2),   # 12:50, 13:10 (Asst)
+    ("1:30-2:10PM",  "13:30", 2),   # 13:30, 13:50 (Main)
+    ("4:00-6:00PM",  "16:00", 6),   # 16:00, 16:20, 16:40, 17:00, 17:20, 17:40
 ]
 
 # Build ordered time-slot labels within a day
@@ -43,19 +45,38 @@ def build_time_slots():
             slots.append(f"{hh:02d}:{mm:02d}")
     return slots
 
-TIME_SLOTS = build_time_slots()  # 15 slots per day
+TIME_SLOTS = build_time_slots()  # 16 slots per day
 SLOTS_PER_DAY = len(TIME_SLOTS)
 
 # Morning slots (8-10 AM) indices
 MORNING_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t < "12:00"]
-# Afternoon slots (1-2 PM and 4-6 PM) indices
+# Afternoon slots (1:30 PM and 4-6 PM) indices
 AFTERNOON_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t >= "12:00"]
 
+# ─── Coach availability per slot ────────────────────────────────────────
+# Main coaches: 8:00-10:00, 13:30-14:10, 16:00-18:00
+MAIN_SLOT_INDICES = set()
+for _i, _t in enumerate(TIME_SLOTS):
+    if _t < "10:00":                       _MAIN_SLOT_INDICES_add = True   # 08:00-09:40
+    elif "13:30" <= _t <= "13:50":          _MAIN_SLOT_INDICES_add = True   # 13:30-13:50
+    elif _t >= "16:00":                    _MAIN_SLOT_INDICES_add = True   # 16:00-17:40
+    else:                                   _MAIN_SLOT_INDICES_add = False
+    if _MAIN_SLOT_INDICES_add: MAIN_SLOT_INDICES.add(_i)
+
+# Assistant coaches: 8:00-9:00, 12:50-13:30, 16:00-18:00
+ASST_SLOT_INDICES = set()
+for _i, _t in enumerate(TIME_SLOTS):
+    if _t < "09:00":                       _ASST_SLOT_INDICES_add = True   # 08:00-08:40
+    elif "12:50" <= _t <= "13:10":          _ASST_SLOT_INDICES_add = True   # 12:50-13:10
+    elif _t >= "16:00":                    _ASST_SLOT_INDICES_add = True   # 16:00-17:40
+    else:                                   _ASST_SLOT_INDICES_add = False
+    if _ASST_SLOT_INDICES_add: ASST_SLOT_INDICES.add(_i)
+
 # Assistant coach slot priority: early sessions first, avoid late (17:40+)
-ASST_PREFERRED_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t < "17:40"]
-ASST_LATE_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t >= "17:40"]
-# For kids with >1 asst lessons: prefer morning + early afternoon (before 4PM)
-ASST_MULTI_LESSON_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t < "16:00"]
+ASST_PREFERRED_SLOTS = [i for i in sorted(ASST_SLOT_INDICES) if TIME_SLOTS[i] < "17:40"]
+ASST_LATE_SLOTS = [i for i in sorted(ASST_SLOT_INDICES) if TIME_SLOTS[i] >= "17:40"]
+# For kids with >=3 asst lessons: prefer morning asst slots (before 4PM)
+ASST_MULTI_LESSON_SLOTS = [i for i in sorted(ASST_SLOT_INDICES) if TIME_SLOTS[i] < "16:00"]
 
 # Map session start times to their slot indices
 SESSION_SLOT_MAP = {}
@@ -241,7 +262,16 @@ def read_schedule_from_excel(filename=None):
     print(f"  Successfully read {sum(len(s) for s in schedule.values())} assignments from {filename}")
 
 # ─── SCHEDULING HELPERS ─────────────────────────────────────────────────
+def is_coach_available(coach, slot_idx):
+    """Check if a coach can work at this time slot based on their schedule."""
+    if coach in MAIN_COACHES:
+        return slot_idx in MAIN_SLOT_INDICES
+    else:  # assistant coach
+        return slot_idx in ASST_SLOT_INDICES
+
 def is_slot_free(coach, day_idx, slot_idx):
+    if not is_coach_available(coach, slot_idx):
+        return False
     return (day_idx, slot_idx) not in schedule[coach]
 
 def assign_slot(kid, coach, day_idx, slot_idx):
@@ -293,6 +323,11 @@ def kid_has_asst_on_day(kid, day_idx):
     return any(d == day_idx and c in ASST_COACHES
                for d, s, c in kid_assignments[kid])
 
+def kid_has_main_on_day(kid, day_idx):
+    """Return True if the kid already has any main coach lesson on this day."""
+    return any(d == day_idx and c in MAIN_COACHES
+               for d, s, c in kid_assignments[kid])
+
 def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots=False, preferred_slot_indices=None, locked_coach=None, is_dual=False, is_asst=False):
     candidates = get_prioritized_candidates(shuffle_slots, preferred_slot_indices)
     for slot_idx in candidates:
@@ -304,6 +339,7 @@ def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots
             if (day_idx, slot_idx) in kid_busy[kid]: continue
             if is_dual and not is_time_separated(kid, day_idx, slot_idx): continue
             if is_asst and kid_has_asst_on_day(kid, day_idx): continue
+            if not is_asst and kid_has_main_on_day(kid, day_idx): continue
                 
             if locked_coach:
                 if is_slot_free(locked_coach, day_idx, slot_idx):
@@ -328,25 +364,27 @@ def find_best_slots_flexible_v2(kid, coach_list, num_needed, shuffle_slots=False
     
     candidates = get_prioritized_candidates(shuffle_slots, preferred_slot_indices)
     available = []
-    asst_days_picked = set()  # track days tentatively chosen within this call
+    days_picked = set()  # track days tentatively chosen within this call
     for slot_idx in candidates:
         day_indices = list(range(NUM_DAYS))
         if shuffle_slots: random.shuffle(day_indices)
         for day_idx in day_indices:
             if (day_idx, slot_idx) in kid_busy[kid]: continue
             if is_dual and not is_time_separated(kid, day_idx, slot_idx): continue
-            if is_asst and (kid_has_asst_on_day(kid, day_idx) or day_idx in asst_days_picked): continue
+            
+            if is_asst and (kid_has_asst_on_day(kid, day_idx) or day_idx in days_picked): continue
+            if not is_asst and (kid_has_main_on_day(kid, day_idx) or day_idx in days_picked): continue
             
             if locked_coach:
                 if is_slot_free(locked_coach, day_idx, slot_idx):
                     available.append((day_idx, slot_idx, locked_coach))
-                    if is_asst: asst_days_picked.add(day_idx)
+                    days_picked.add(day_idx)
             else:
                 coaches_sorted = sorted(coach_list, key=lambda c: get_coach_load(c))
                 for coach in coaches_sorted:
                     if is_slot_free(coach, day_idx, slot_idx):
                         available.append((day_idx, slot_idx, coach))
-                        if is_asst: asst_days_picked.add(day_idx)
+                        days_picked.add(day_idx)
                         break
     if len(available) >= num_needed: return available[:num_needed]
     return None
