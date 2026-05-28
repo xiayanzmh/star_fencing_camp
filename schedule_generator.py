@@ -11,7 +11,7 @@ import argparse
 import sys
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────
-EXCEL_FILE = "input_data/Aug_shenzhen.xlsx"
+EXCEL_FILE = "input_data/Aug_shenzhen2.xlsx"
 SHEET_NAME = "input_data_fix"
 OUTPUT_DIR = "output"
 DEFAULT_MAX_MAIN_LESSONS = 4
@@ -50,6 +50,12 @@ SLOTS_PER_DAY = len(TIME_SLOTS)
 MORNING_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t < "12:00"]
 # Afternoon slots (1-2 PM and 4-6 PM) indices
 AFTERNOON_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t >= "12:00"]
+
+# Assistant coach slot priority: early sessions first, avoid late (17:40+)
+ASST_PREFERRED_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t < "17:40"]
+ASST_LATE_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t >= "17:40"]
+# For kids with >1 asst lessons: prefer morning + early afternoon (before 4PM)
+ASST_MULTI_LESSON_SLOTS = [i for i, t in enumerate(TIME_SLOTS) if t < "16:00"]
 
 # Map session start times to their slot indices
 SESSION_SLOT_MAP = {}
@@ -94,7 +100,24 @@ def time_pref_to_slot_indices(time_pref):
 MAIN_COACHES = []
 ASST_COACHES = []
 CORE_MAIN = {"吴主教练", "张杰主教练", "赵凯主教练", "Tamer主教练", "Shaimaa主教练"}
-CORE_ASST = {"叶助理教练", "王助理教练"}
+CORE_ASST = {"叶助理教练", "王助理教练", "蔡教练", "房凌志教练"}
+
+# Display name mapping: internal key → pretty label shown in all outputs
+COACH_DISPLAY_NAMES = {
+    "吴主教练":    "吴汉雄教练",
+    "Shaimaa主教练": "Shaimaa教练",
+    "Tamer主教练":  "Tamer教练",
+    "张杰主教练":   "张杰教练",
+    "赵凯主教练":   "赵凯教练",
+    "叶助理教练":   "叶俊伟教练",
+    "王助理教练":   "王威发教练",
+    "蔡教练":      "蔡教练",
+    "房凌志教练":   "房凌志教练",
+}
+
+def display(coach):
+    """Return the display name for a coach (falls back to the internal name)."""
+    return COACH_DISPLAY_NAMES.get(coach, coach)
 
 # ─── DATA STRUCTURES ────────────────────────────────────────────────────
 schedule = {}
@@ -190,10 +213,15 @@ def read_schedule_from_excel(filename=None):
         
         # Load headers to find coach columns
         headers = [str(cell.value).strip() if cell.value else None for cell in ws[1]]
-        coach_map = {} # col_idx -> coach_name
+        # Build reverse map: display name → internal name
+        display_to_internal = {display(c): c for c in MAIN_COACHES + ASST_COACHES}
+        coach_map = {} # col_idx -> internal coach_name
         for i, h in enumerate(headers):
-            if h and h in (MAIN_COACHES + ASST_COACHES):
+            if not h: continue
+            if h in (MAIN_COACHES + ASST_COACHES):
                 coach_map[i+1] = h
+            elif h in display_to_internal:
+                coach_map[i+1] = display_to_internal[h]
         
         # Iterate rows
         for row in ws.iter_rows(min_row=2, values_only=True):
@@ -260,7 +288,12 @@ def is_time_separated(kid, day_idx, slot_idx):
     if existing_is_morning: return new_is_afternoon
     else: return new_is_morning
 
-def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots=False, preferred_slot_indices=None, locked_coach=None, is_dual=False):
+def kid_has_asst_on_day(kid, day_idx):
+    """Return True if the kid already has any assistant coach lesson on this day."""
+    return any(d == day_idx and c in ASST_COACHES
+               for d, s, c in kid_assignments[kid])
+
+def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots=False, preferred_slot_indices=None, locked_coach=None, is_dual=False, is_asst=False):
     candidates = get_prioritized_candidates(shuffle_slots, preferred_slot_indices)
     for slot_idx in candidates:
         available_options = []
@@ -270,6 +303,7 @@ def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots
         for day_idx in day_indices:
             if (day_idx, slot_idx) in kid_busy[kid]: continue
             if is_dual and not is_time_separated(kid, day_idx, slot_idx): continue
+            if is_asst and kid_has_asst_on_day(kid, day_idx): continue
                 
             if locked_coach:
                 if is_slot_free(locked_coach, day_idx, slot_idx):
@@ -288,30 +322,97 @@ def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots
             return [(d, slot_idx, c) for d, c in chosen]
     return None
 
-def find_best_slots_flexible_v2(kid, coach_list, num_needed, shuffle_slots=False, preferred_slot_indices=None, locked_coach=None, is_dual=False):
-    result = find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots, preferred_slot_indices, locked_coach, is_dual)
+def find_best_slots_flexible_v2(kid, coach_list, num_needed, shuffle_slots=False, preferred_slot_indices=None, locked_coach=None, is_dual=False, is_asst=False):
+    result = find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots, preferred_slot_indices, locked_coach, is_dual, is_asst)
     if result: return result
     
     candidates = get_prioritized_candidates(shuffle_slots, preferred_slot_indices)
     available = []
+    asst_days_picked = set()  # track days tentatively chosen within this call
     for slot_idx in candidates:
         day_indices = list(range(NUM_DAYS))
         if shuffle_slots: random.shuffle(day_indices)
         for day_idx in day_indices:
             if (day_idx, slot_idx) in kid_busy[kid]: continue
             if is_dual and not is_time_separated(kid, day_idx, slot_idx): continue
+            if is_asst and (kid_has_asst_on_day(kid, day_idx) or day_idx in asst_days_picked): continue
             
             if locked_coach:
                 if is_slot_free(locked_coach, day_idx, slot_idx):
                     available.append((day_idx, slot_idx, locked_coach))
+                    if is_asst: asst_days_picked.add(day_idx)
             else:
                 coaches_sorted = sorted(coach_list, key=lambda c: get_coach_load(c))
                 for coach in coaches_sorted:
                     if is_slot_free(coach, day_idx, slot_idx):
                         available.append((day_idx, slot_idx, coach))
+                        if is_asst: asst_days_picked.add(day_idx)
                         break
     if len(available) >= num_needed: return available[:num_needed]
     return None
+
+def find_random_asst_slots(kid, coach_list, num_needed, preferred_slot_indices=None, is_dual=False):
+    """Randomly assign assistant coach slots.
+
+    For unassigned (no coach_request) assistant coach requests:
+    - Randomly picks from available assistant coaches
+    - Max 1 assistant coach lesson per kid per day (hard constraint)
+    - Won't conflict with main coach time slots (enforced via kid_busy)
+    """
+    # Order: early slots first (morning → 1PM → 4-5:20PM), 17:40 last
+    pref = list(preferred_slot_indices) if preferred_slot_indices else list(ASST_PREFERRED_SLOTS)
+    late = [s for s in ASST_LATE_SLOTS if s not in pref]
+    other = [s for s in range(SLOTS_PER_DAY) if s not in pref and s not in late]
+    candidates = pref + other + late  # early first, 17:40 last
+
+    # Phase A: try to find a consistent time slot across enough days
+    for slot_idx in candidates:
+        options = []
+        days = list(range(NUM_DAYS))
+        random.shuffle(days)
+        for day_idx in days:
+            if (day_idx, slot_idx) in kid_busy[kid]:
+                continue
+            if is_dual and not is_time_separated(kid, day_idx, slot_idx):
+                continue
+            # Max 1 assistant coach lesson per day
+            if kid_has_asst_on_day(kid, day_idx):
+                continue
+            avail = [c for c in coach_list
+                     if is_slot_free(c, day_idx, slot_idx)]
+            if avail:
+                options.append((day_idx, slot_idx, random.choice(avail)))
+        if len(options) >= num_needed:
+            return options[:num_needed]
+
+    # Phase B: flexible — gather from any slot/day combination
+    collected = []
+    used = set()      # track (day, slot) already picked
+    days_picked = set()  # track days already picked (max 1 asst per day)
+    for slot_idx in candidates:
+        days = list(range(NUM_DAYS))
+        random.shuffle(days)
+        for day_idx in days:
+            if day_idx in days_picked:
+                continue
+            if (day_idx, slot_idx) in used:
+                continue
+            if (day_idx, slot_idx) in kid_busy[kid]:
+                continue
+            if is_dual and not is_time_separated(kid, day_idx, slot_idx):
+                continue
+            if kid_has_asst_on_day(kid, day_idx):
+                continue
+            avail = [c for c in coach_list
+                     if is_slot_free(c, day_idx, slot_idx)]
+            if avail:
+                collected.append((day_idx, slot_idx, random.choice(avail)))
+                used.add((day_idx, slot_idx))
+                days_picked.add(day_idx)
+                if len(collected) >= num_needed:
+                    return collected
+
+    return collected if collected else None
 
 # ─── MAIN SCHEDULING LOGIC ─────────────────────────────────────────────
 def build_schedule(shuffle_slots=False, max_main=DEFAULT_MAX_MAIN_LESSONS):
@@ -336,15 +437,28 @@ def build_schedule(shuffle_slots=False, max_main=DEFAULT_MAX_MAIN_LESSONS):
         if slots:
             for d, s, c in slots: assign_slot(kid, c, d, s)
     
-    # ── PHASE 2: Coach-requested 助理教练 ────
-    print(f"\n=== Phase 2: Coach-requested 助理教练 (Shuffle={shuffle_slots}) ===")
+    # ── PHASE 2a: Coach-requested 助理教练 (≥3 lessons → morning/early PM first) ────
+    print(f"\n=== Phase 2a: Coach-requested 助理教练 ≥3 lessons (Shuffle={shuffle_slots}) ===")
     requested_asst = [r for r in asst_requests if r['coach_request']]
-    requested_asst.sort(key=lambda r: (r['name'] not in dual_kids, -r['class_num']))
-    for req in requested_asst:
+    requested_asst_hi = [r for r in requested_asst if r['class_num'] >= 3]
+    requested_asst_lo = [r for r in requested_asst if r['class_num'] < 3]
+    requested_asst_hi.sort(key=lambda r: (r['name'] not in dual_kids, -r['class_num']))
+    for req in requested_asst_hi:
         kid, coach, num = req['name'], req['coach_request'], req['class_num']
         if coach not in ASST_COACHES: continue
-        pref_slots = req.get('time_pref_slots') or AFTERNOON_SLOTS
-        slots = find_best_slots_flexible_v2(kid, [coach], num, shuffle_slots, preferred_slot_indices=pref_slots, locked_coach=coach, is_dual=kid in dual_kids)
+        pref_slots = req.get('time_pref_slots') or ASST_MULTI_LESSON_SLOTS
+        slots = find_best_slots_flexible_v2(kid, [coach], num, shuffle_slots, preferred_slot_indices=pref_slots, locked_coach=coach, is_dual=kid in dual_kids, is_asst=True)
+        if slots:
+            for d, s, c in slots: assign_slot(kid, c, d, s)
+
+    # ── PHASE 2b: Coach-requested 助理教练 (<3 lessons → fill remaining) ────
+    print(f"\n=== Phase 2b: Coach-requested 助理教练 <3 lessons (Shuffle={shuffle_slots}) ===")
+    requested_asst_lo.sort(key=lambda r: (r['name'] not in dual_kids, -r['class_num']))
+    for req in requested_asst_lo:
+        kid, coach, num = req['name'], req['coach_request'], req['class_num']
+        if coach not in ASST_COACHES: continue
+        pref_slots = req.get('time_pref_slots') or ASST_PREFERRED_SLOTS
+        slots = find_best_slots_flexible_v2(kid, [coach], num, shuffle_slots, preferred_slot_indices=pref_slots, locked_coach=coach, is_dual=kid in dual_kids, is_asst=True)
         if slots:
             for d, s, c in slots: assign_slot(kid, c, d, s)
     
@@ -359,16 +473,36 @@ def build_schedule(shuffle_slots=False, max_main=DEFAULT_MAX_MAIN_LESSONS):
         if slots:
             for d, s, c in slots: assign_slot(kid, c, d, s)
     
-    # ── PHASE 4: No-preference 助理教练 ────
-    print(f"\n=== Phase 4: No-preference 助理教练 (Shuffle={shuffle_slots}) ===")
+    # ── PHASE 4a: No-preference 助理教练 ≥3 lessons (morning/early PM first) ────
+    print(f"\n=== Phase 4a: No-preference 助理教练 ≥3 lessons — random assign (Shuffle={shuffle_slots}) ===")
     no_pref_asst = [r for r in asst_requests if not r['coach_request']]
-    no_pref_asst.sort(key=lambda r: (r['name'] not in dual_kids, -r['class_num']))
-    for req in no_pref_asst:
+    no_pref_asst_hi = [r for r in no_pref_asst if r['class_num'] >= 3]
+    no_pref_asst_lo = [r for r in no_pref_asst if r['class_num'] < 3]
+    no_pref_asst_hi.sort(key=lambda r: (r['name'] not in dual_kids, -r['class_num']))
+    for req in no_pref_asst_hi:
         kid, num = req['name'], req['class_num']
-        pref_slots = req.get('time_pref_slots') or AFTERNOON_SLOTS
-        slots = find_best_slots_flexible_v2(kid, ASST_COACHES, num, shuffle_slots, preferred_slot_indices=pref_slots, is_dual=kid in dual_kids)
+        pref_slots = req.get('time_pref_slots') or ASST_MULTI_LESSON_SLOTS
+        slots = find_random_asst_slots(kid, ASST_COACHES, num,
+                                       preferred_slot_indices=pref_slots,
+                                       is_dual=kid in dual_kids)
         if slots:
-            for d, s, c in slots: assign_slot(kid, c, d, s)
+            for d, s, c in slots:
+                assign_slot(kid, c, d, s)
+                print(f"    {kid} → {c} on D{d+1} {TIME_SLOTS[s]}")
+
+    # ── PHASE 4b: No-preference 助理教练 <3 lessons (fill remaining) ────
+    print(f"\n=== Phase 4b: No-preference 助理教练 <3 lessons — random assign (Shuffle={shuffle_slots}) ===")
+    no_pref_asst_lo.sort(key=lambda r: (r['name'] not in dual_kids, -r['class_num']))
+    for req in no_pref_asst_lo:
+        kid, num = req['name'], req['class_num']
+        pref_slots = req.get('time_pref_slots') or ASST_PREFERRED_SLOTS
+        slots = find_random_asst_slots(kid, ASST_COACHES, num,
+                                       preferred_slot_indices=pref_slots,
+                                       is_dual=kid in dual_kids)
+        if slots:
+            for d, s, c in slots:
+                assign_slot(kid, c, d, s)
+                print(f"    {kid} → {c} on D{d+1} {TIME_SLOTS[s]}")
     
     return requests
 
@@ -382,7 +516,7 @@ def write_coach_csv(filename=None):
             coach_schedule = schedule[coach]
             if not coach_schedule: continue
             writer.writerow([])
-            writer.writerow([f"=== {coach} === (Total: {len(coach_schedule)} lessons)"])
+            writer.writerow([f"=== {display(coach)} === (Total: {len(coach_schedule)} lessons)"])
             writer.writerow(["Time Slot"] + DAY_LABELS)
             for slot_idx, time_label in enumerate(TIME_SLOTS):
                 row = [time_label]
@@ -400,7 +534,7 @@ def write_kid_csv(filename=None):
             lessons = sorted(kid_assignments[kid], key=lambda x: (x[0], x[1]))
             for day_idx, slot_idx, coach in lessons:
                 ctype = "主教练" if coach in MAIN_COACHES else "助理教练"
-                writer.writerow([kid, DAY_LABELS[day_idx], TIME_SLOTS[slot_idx], coach, ctype])
+                writer.writerow([kid, DAY_LABELS[day_idx], TIME_SLOTS[slot_idx], display(coach), ctype])
 
 def write_summary_csv(requests, filename=None):
     if filename is None:
@@ -485,7 +619,7 @@ def write_excel(filename=None):
         ws.column_dimensions['A'].width = 14
         
         for col_idx, coach in enumerate(all_coaches, start=2):
-            cell = ws.cell(row=1, column=col_idx, value=coach)
+            cell = ws.cell(row=1, column=col_idx, value=display(coach))
             cell.font = header_font_white
             cell.fill = header_fill
             cell.alignment = cell_alignment
@@ -557,8 +691,9 @@ def write_coach_excel(filename=None):
         coach_sched = schedule[coach]
         if not coach_sched and coach not in CORE_MAIN and coach not in CORE_ASST: continue
         
-        ws = wb.create_sheet(title=coach[:31]) # Excel sheet name limit
-        
+        disp = display(coach)
+        ws = wb.create_sheet(title=disp[:31])  # Excel sheet name limit
+
         # Header Row
         ws.cell(row=1, column=1, value="Time Slot").font = header_font_white
         ws.cell(row=1, column=1).fill = header_fill
