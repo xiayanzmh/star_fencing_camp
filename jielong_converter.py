@@ -10,7 +10,7 @@ OUTPUT_FILE = "input_data/Aug_shenzhen_from_jielong.xlsx"
 
 # Standard coach names from schedule_generator.py
 MAIN_COACHES = ["吴主教练", "张杰主教练", "赵凯主教练", "Tamer主教练", "Shaimaa主教练"]
-ASST_COACHES = ["叶助理教练", "王助理教练"]
+ASST_COACHES = ["叶助理教练", "王助理教练", "蔡家贤教练"]
 
 def clean_text(text):
     if not text: return ""
@@ -48,6 +48,7 @@ def map_coach_request(text):
     if "Shaimaa" in text: return "Shaimaa主教练"
     if "叶" in text: return "叶助理教练"
     if "王" in text: return "王助理教练"
+    if "蔡" in text: return "蔡家贤教练"
     return None
 
 def parse_jielong(max_main_lessons=None):
@@ -74,7 +75,7 @@ def parse_jielong(max_main_lessons=None):
         # 1. Identify Students
         # Search for names/groups before the first "节" or "各" or "主教练" etc.
         # Added coach names to stop regex to avoid them bleeding into student names
-        m_stop = re.search(r"(\d+|[一二三四五六七八九十]|各)节|各|主教练|助理教练|主教|助教|吴|张|赵|Kai|Tamer|Shaimaa|叶|王", raw_text)
+        m_stop = re.search(r"(\d+|[一二三四五六七八九十]|各)节|各|主教练|助理教练|主教|助教|吴|张|赵|Kai|Tamer|Shaimaa|叶|王|蔡", raw_text)
         if m_stop:
             student_part = raw_text[:m_stop.start()]
         else:
@@ -103,14 +104,14 @@ def parse_jielong(max_main_lessons=None):
         for seg in segments:
             # Pattern 1: (count)节 ... (coach)
             # Added (?:私[课教])? to handle "6节私课"
-            matches = re.findall(r"(\d+|[一二三四五六七八九十])节(?:私[课教])?\s*\(?(主教练|助理教练|主教|助教|吴|张|赵|Kai|Tamer|Shaimaa|叶|王)?\)?", seg)
+            matches = re.findall(r"(\d+|[一二三四五六七八九十])节(?:私[课教])?\s*\(?(主教练|助理教练|主教|助教|吴|张|赵|Kai|Tamer|Shaimaa|叶|王|蔡)?\)?", seg)
             for count_str, c_info in matches:
                 count = parse_num(count_str)
                 if count == 0: continue
                 if "40分钟" in seg: count *= 2
                 
                 c_type = "主教练"
-                if c_info and ("助" in c_info or "叶" in c_info or "王" in c_info):
+                if c_info and ("助" in c_info or "叶" in c_info or "王" in c_info or "蔡" in c_info):
                     c_type = "助理教练"
                 
                 c_req = map_coach_request(c_info)
@@ -118,13 +119,13 @@ def parse_jielong(max_main_lessons=None):
 
             # Pattern 2: (coach) ... (count)节
             if not matches:
-                matches = re.findall(r"(主教练|助理教练|主教|助教|吴|张|赵|Kai|Tamer|Shaimaa|叶|王)\s*(?:私[课教])?(\d+|[一二三四五六七八九十])节", seg)
+                matches = re.findall(r"(主教练|助理教练|主教|助教|吴|张|赵|Kai|Tamer|Shaimaa|叶|王|蔡)\s*(?:私[课教])?(\d+|[一二三四五六七八九十])节", seg)
                 for c_info, count_str in matches:
                     count = parse_num(count_str)
                     if count == 0: continue
                     if "40分钟" in seg: count *= 2
                     c_type = "主教练"
-                    if c_info and ("助" in c_info or "叶" in c_info or "王" in c_info):
+                    if c_info and ("助" in c_info or "叶" in c_info or "王" in c_info or "蔡" in c_info):
                         c_type = "助理教练"
                     c_req = map_coach_request(c_info)
                     found_requests.append({'count': count, 'type': c_type, 'request': c_req})

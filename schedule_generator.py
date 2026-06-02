@@ -17,6 +17,8 @@ OUTPUT_DIR = "output"
 DEFAULT_MAX_MAIN_LESSONS = 4
 NUM_DAYS = 6
 DAY_LABELS = [f"Day{i}" for i in range(1, NUM_DAYS + 1)]
+OUTPUT_SUFFIX = ""
+
 
 # Ensure output directory exists
 import os
@@ -121,7 +123,7 @@ def time_pref_to_slot_indices(time_pref):
 MAIN_COACHES = []
 ASST_COACHES = []
 CORE_MAIN = {"吴主教练", "张杰主教练", "赵凯主教练", "Tamer主教练", "Shaimaa主教练"}
-CORE_ASST = {"叶助理教练", "王助理教练", "蔡教练", "房凌志教练"}
+CORE_ASST = {"叶助理教练", "王助理教练", "蔡家贤教练", "房凌志教练"}
 
 # Display name mapping: internal key → pretty label shown in all outputs
 COACH_DISPLAY_NAMES = {
@@ -132,7 +134,7 @@ COACH_DISPLAY_NAMES = {
     "赵凯主教练":   "赵凯教练",
     "叶助理教练":   "叶俊伟教练",
     "王助理教练":   "王威发教练",
-    "蔡教练":      "蔡教练",
+    "蔡家贤教练":   "蔡家贤教练",
     "房凌志教练":   "房凌志教练",
 }
 
@@ -178,6 +180,8 @@ def read_input(max_main=DEFAULT_MAX_MAIN_LESSONS):
         except: class_num = 0
             
         c_req = str(coach_request).strip() if coach_request else None
+        if c_req == "蔡教练" or c_req == "蔡家贤":
+            c_req = "蔡家贤教练"
         c_type = str(coach_type).strip() if coach_type else None
         
         if c_req:
@@ -218,9 +222,27 @@ def read_input(max_main=DEFAULT_MAX_MAIN_LESSONS):
 
 def read_schedule_from_excel(filename=None):
     """Parse SummerCamp_Schedule.xlsx (Day1-Day6 tabs) back into global schedule dict."""
+    global OUTPUT_SUFFIX, schedule, kid_assignments, kid_busy
     if filename is None:
-        filename = os.path.join(OUTPUT_DIR, "SummerCamp_Schedule.xlsx")
-    global schedule, kid_assignments, kid_busy
+        ocps_path = os.path.join(OUTPUT_DIR, "SummerCamp_Schedule_ocps.xlsx")
+        default_path = os.path.join(OUTPUT_DIR, "SummerCamp_Schedule.xlsx")
+        if os.path.exists(ocps_path):
+            if os.path.exists(default_path):
+                # Both exist, use the newer one
+                if os.path.getmtime(ocps_path) > os.path.getmtime(default_path):
+                    filename = ocps_path
+                else:
+                    filename = default_path
+            else:
+                filename = ocps_path
+        else:
+            filename = default_path
+
+    if "_ocps" in os.path.basename(filename):
+        OUTPUT_SUFFIX = "_ocps"
+    else:
+        OUTPUT_SUFFIX = ""
+
     import openpyxl
     wb = openpyxl.load_workbook(filename, data_only=True)
     reset_state()
@@ -236,6 +258,9 @@ def read_schedule_from_excel(filename=None):
         headers = [str(cell.value).strip() if cell.value else None for cell in ws[1]]
         # Build reverse map: display name → internal name
         display_to_internal = {display(c): c for c in MAIN_COACHES + ASST_COACHES}
+        if "蔡家贤教练" in display_to_internal:
+            display_to_internal["蔡教练"] = "蔡家贤教练"
+            display_to_internal["蔡家贤"] = "蔡家贤教练"
         coach_map = {} # col_idx -> internal coach_name
         for i, h in enumerate(headers):
             if not h: continue
@@ -328,7 +353,11 @@ def kid_has_main_on_day(kid, day_idx):
     return any(d == day_idx and c in MAIN_COACHES
                for d, s, c in kid_assignments[kid])
 
-def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots=False, preferred_slot_indices=None, locked_coach=None, is_dual=False, is_asst=False):
+def kid_has_any_class_on_day(kid, day_idx):
+    """Return True if the kid already has any lesson (main or asst) on this day."""
+    return any(d == day_idx for d, s, c in kid_assignments[kid])
+
+def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots=False, preferred_slot_indices=None, locked_coach=None, is_dual=False, is_asst=False, one_per_day=False):
     candidates = get_prioritized_candidates(shuffle_slots, preferred_slot_indices)
     for slot_idx in candidates:
         available_options = []
@@ -337,9 +366,12 @@ def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots
         
         for day_idx in day_indices:
             if (day_idx, slot_idx) in kid_busy[kid]: continue
-            if is_dual and not is_time_separated(kid, day_idx, slot_idx): continue
-            if is_asst and kid_has_asst_on_day(kid, day_idx): continue
-            if not is_asst and kid_has_main_on_day(kid, day_idx): continue
+            if one_per_day:
+                if kid_has_any_class_on_day(kid, day_idx): continue
+            else:
+                if is_dual and not is_time_separated(kid, day_idx, slot_idx): continue
+                if is_asst and kid_has_asst_on_day(kid, day_idx): continue
+                if not is_asst and kid_has_main_on_day(kid, day_idx): continue
                 
             if locked_coach:
                 if is_slot_free(locked_coach, day_idx, slot_idx):
@@ -358,8 +390,8 @@ def find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots
             return [(d, slot_idx, c) for d, c in chosen]
     return None
 
-def find_best_slots_flexible_v2(kid, coach_list, num_needed, shuffle_slots=False, preferred_slot_indices=None, locked_coach=None, is_dual=False, is_asst=False):
-    result = find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots, preferred_slot_indices, locked_coach, is_dual, is_asst)
+def find_best_slots_flexible_v2(kid, coach_list, num_needed, shuffle_slots=False, preferred_slot_indices=None, locked_coach=None, is_dual=False, is_asst=False, one_per_day=False):
+    result = find_consistent_multi_coach_slots(kid, coach_list, num_needed, shuffle_slots, preferred_slot_indices, locked_coach, is_dual, is_asst, one_per_day)
     if result: return result
     
     candidates = get_prioritized_candidates(shuffle_slots, preferred_slot_indices)
@@ -370,10 +402,12 @@ def find_best_slots_flexible_v2(kid, coach_list, num_needed, shuffle_slots=False
         if shuffle_slots: random.shuffle(day_indices)
         for day_idx in day_indices:
             if (day_idx, slot_idx) in kid_busy[kid]: continue
-            if is_dual and not is_time_separated(kid, day_idx, slot_idx): continue
-            
-            if is_asst and (kid_has_asst_on_day(kid, day_idx) or day_idx in days_picked): continue
-            if not is_asst and (kid_has_main_on_day(kid, day_idx) or day_idx in days_picked): continue
+            if one_per_day:
+                if kid_has_any_class_on_day(kid, day_idx) or day_idx in days_picked: continue
+            else:
+                if is_dual and not is_time_separated(kid, day_idx, slot_idx): continue
+                if is_asst and (kid_has_asst_on_day(kid, day_idx) or day_idx in days_picked): continue
+                if not is_asst and (kid_has_main_on_day(kid, day_idx) or day_idx in days_picked): continue
             
             if locked_coach:
                 if is_slot_free(locked_coach, day_idx, slot_idx):
@@ -389,13 +423,14 @@ def find_best_slots_flexible_v2(kid, coach_list, num_needed, shuffle_slots=False
     if len(available) >= num_needed: return available[:num_needed]
     return None
 
-def find_random_asst_slots(kid, coach_list, num_needed, preferred_slot_indices=None, is_dual=False):
+def find_random_asst_slots(kid, coach_list, num_needed, preferred_slot_indices=None, is_dual=False, one_per_day=False):
     """Randomly assign assistant coach slots.
 
     For unassigned (no coach_request) assistant coach requests:
     - Randomly picks from available assistant coaches
     - Max 1 assistant coach lesson per kid per day (hard constraint)
     - Won't conflict with main coach time slots (enforced via kid_busy)
+    When one_per_day=True, blocks any day that already has ANY class.
     """
     # Order: early slots first (morning → 1PM → 4-5:20PM), 17:40 last
     pref = list(preferred_slot_indices) if preferred_slot_indices else list(ASST_PREFERRED_SLOTS)
@@ -411,11 +446,15 @@ def find_random_asst_slots(kid, coach_list, num_needed, preferred_slot_indices=N
         for day_idx in days:
             if (day_idx, slot_idx) in kid_busy[kid]:
                 continue
-            if is_dual and not is_time_separated(kid, day_idx, slot_idx):
-                continue
-            # Max 1 assistant coach lesson per day
-            if kid_has_asst_on_day(kid, day_idx):
-                continue
+            if one_per_day:
+                if kid_has_any_class_on_day(kid, day_idx):
+                    continue
+            else:
+                if is_dual and not is_time_separated(kid, day_idx, slot_idx):
+                    continue
+                # Max 1 assistant coach lesson per day
+                if kid_has_asst_on_day(kid, day_idx):
+                    continue
             avail = [c for c in coach_list
                      if is_slot_free(c, day_idx, slot_idx)]
             if avail:
@@ -426,7 +465,7 @@ def find_random_asst_slots(kid, coach_list, num_needed, preferred_slot_indices=N
     # Phase B: flexible — gather from any slot/day combination
     collected = []
     used = set()      # track (day, slot) already picked
-    days_picked = set()  # track days already picked (max 1 asst per day)
+    days_picked = set()  # track days already picked (max 1 per day)
     for slot_idx in candidates:
         days = list(range(NUM_DAYS))
         random.shuffle(days)
@@ -437,10 +476,14 @@ def find_random_asst_slots(kid, coach_list, num_needed, preferred_slot_indices=N
                 continue
             if (day_idx, slot_idx) in kid_busy[kid]:
                 continue
-            if is_dual and not is_time_separated(kid, day_idx, slot_idx):
-                continue
-            if kid_has_asst_on_day(kid, day_idx):
-                continue
+            if one_per_day:
+                if kid_has_any_class_on_day(kid, day_idx):
+                    continue
+            else:
+                if is_dual and not is_time_separated(kid, day_idx, slot_idx):
+                    continue
+                if kid_has_asst_on_day(kid, day_idx):
+                    continue
             avail = [c for c in coach_list
                      if is_slot_free(c, day_idx, slot_idx)]
             if avail:
@@ -544,10 +587,79 @@ def build_schedule(shuffle_slots=False, max_main=DEFAULT_MAX_MAIN_LESSONS):
     
     return requests
 
+def build_schedule_one_class_per_day(shuffle_slots=False, max_main=DEFAULT_MAX_MAIN_LESSONS):
+    """Build schedule with hard constraint: max 1 class per kid per day (any type)."""
+    requests = read_input(max_main=max_main)
+    reset_state()
+    
+    main_requests = [r for r in requests if r['coach_type'] == '主教练']
+    asst_requests = [r for r in requests if r['coach_type'] == '助理教练']
+    
+    # Warn about kids whose total requests exceed 6 days
+    from collections import Counter
+    kid_totals = Counter()
+    for r in requests:
+        kid_totals[r['name']] += r['class_num']
+    for kid, total in sorted(kid_totals.items()):
+        if total > NUM_DAYS:
+            print(f"  WARNING: {kid} requests {total} total classes but only {NUM_DAYS} days available (max {NUM_DAYS} with one-per-day).")
+    
+    # ── PHASE 1: Coach-requested 主教练 ──────
+    print(f"\n=== Phase 1: Coach-requested 主教练 (one_per_day, Shuffle={shuffle_slots}) ===")
+    requested_main = [r for r in main_requests if r['coach_request']]
+    requested_main.sort(key=lambda r: -r['class_num'])
+    for req in requested_main:
+        kid, coach, num = req['name'], req['coach_request'], req['class_num']
+        if coach not in MAIN_COACHES: continue
+        pref_slots = req.get('time_pref_slots') or MORNING_SLOTS
+        slots = find_best_slots_flexible_v2(kid, [coach], num, shuffle_slots, preferred_slot_indices=pref_slots, locked_coach=coach, one_per_day=True)
+        if slots:
+            for d, s, c in slots: assign_slot(kid, c, d, s)
+    
+    # ── PHASE 2: Coach-requested 助理教练 ──────
+    print(f"\n=== Phase 2: Coach-requested 助理教练 (one_per_day, Shuffle={shuffle_slots}) ===")
+    requested_asst = [r for r in asst_requests if r['coach_request']]
+    requested_asst.sort(key=lambda r: -r['class_num'])
+    for req in requested_asst:
+        kid, coach, num = req['name'], req['coach_request'], req['class_num']
+        if coach not in ASST_COACHES: continue
+        pref_slots = req.get('time_pref_slots') or ASST_PREFERRED_SLOTS
+        slots = find_best_slots_flexible_v2(kid, [coach], num, shuffle_slots, preferred_slot_indices=pref_slots, locked_coach=coach, is_asst=True, one_per_day=True)
+        if slots:
+            for d, s, c in slots: assign_slot(kid, c, d, s)
+    
+    # ── PHASE 3: No-preference 主教练 ──────
+    print(f"\n=== Phase 3: No-preference 主教练 (one_per_day, Shuffle={shuffle_slots}) ===")
+    no_pref_main = [r for r in main_requests if not r['coach_request']]
+    no_pref_main.sort(key=lambda r: -r['class_num'])
+    for req in no_pref_main:
+        kid, num = req['name'], req['class_num']
+        pref_slots = req.get('time_pref_slots') or MORNING_SLOTS
+        slots = find_best_slots_flexible_v2(kid, MAIN_COACHES, num, shuffle_slots, preferred_slot_indices=pref_slots, one_per_day=True)
+        if slots:
+            for d, s, c in slots: assign_slot(kid, c, d, s)
+    
+    # ── PHASE 4: No-preference 助理教练 ──────
+    print(f"\n=== Phase 4: No-preference 助理教练 (one_per_day, Shuffle={shuffle_slots}) ===")
+    no_pref_asst = [r for r in asst_requests if not r['coach_request']]
+    no_pref_asst.sort(key=lambda r: -r['class_num'])
+    for req in no_pref_asst:
+        kid, num = req['name'], req['class_num']
+        pref_slots = req.get('time_pref_slots') or ASST_PREFERRED_SLOTS
+        slots = find_random_asst_slots(kid, ASST_COACHES, num,
+                                       preferred_slot_indices=pref_slots,
+                                       one_per_day=True)
+        if slots:
+            for d, s, c in slots:
+                assign_slot(kid, c, d, s)
+                print(f"    {kid} → {c} on D{d+1} {TIME_SLOTS[s]}")
+    
+    return requests
+
 # ─── OUTPUT ─────────────────────────────────────────────────────────────
 def write_coach_csv(filename=None):
     if filename is None:
-        filename = os.path.join(OUTPUT_DIR, "schedule_by_coach.csv")
+        filename = os.path.join(OUTPUT_DIR, f"schedule_by_coach{OUTPUT_SUFFIX}.csv")
     with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
         for coach in MAIN_COACHES + ASST_COACHES:
@@ -564,7 +676,7 @@ def write_coach_csv(filename=None):
 
 def write_kid_csv(filename=None):
     if filename is None:
-        filename = os.path.join(OUTPUT_DIR, "schedule_by_kid.csv")
+        filename = os.path.join(OUTPUT_DIR, f"schedule_by_kid{OUTPUT_SUFFIX}.csv")
     with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
         writer.writerow(["Kid Name", "Day", "Time", "Coach", "Coach Type"])
@@ -576,7 +688,7 @@ def write_kid_csv(filename=None):
 
 def write_summary_csv(requests, filename=None):
     if filename is None:
-        filename = os.path.join(OUTPUT_DIR, "schedule_summary.csv")
+        filename = os.path.join(OUTPUT_DIR, f"schedule_summary{OUTPUT_SUFFIX}.csv")
     with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
         writer.writerow(["Kid Name", "Coach Type", "Requested Coach", "Expected", "Assigned", "Coaches", "Status"])
@@ -602,7 +714,7 @@ def write_comparison_csv(requests, a1, a2, filename="schedule_comparison.csv"):
 
 def write_json(filename=None):
     if filename is None:
-        filename = os.path.join(OUTPUT_DIR, "schedule.json")
+        filename = os.path.join(OUTPUT_DIR, f"schedule{OUTPUT_SUFFIX}.json")
     import json
     data = {"coaches": MAIN_COACHES + ASST_COACHES, "days": DAY_LABELS, "slots": TIME_SLOTS, "assignments": []}
     for coach in data["coaches"]:
@@ -616,7 +728,7 @@ def write_excel(filename=None):
     """Write a multi-tab Excel file with one sheet per day (Day1–Day6).
     Each sheet: rows = time slots, columns = coaches."""
     if filename is None:
-        filename = os.path.join(OUTPUT_DIR, "SummerCamp_Schedule.xlsx")
+        filename = os.path.join(OUTPUT_DIR, f"SummerCamp_Schedule{OUTPUT_SUFFIX}.xlsx")
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     
@@ -702,7 +814,7 @@ def write_coach_excel(filename=None):
     """Write a multi-tab Excel where each tab is one coach.
     Columns = Day1 to Day6, Rows = Time Slots."""
     if filename is None:
-        filename = os.path.join(OUTPUT_DIR, "schedule_by_coach.xlsx")
+        filename = os.path.join(OUTPUT_DIR, f"schedule_by_coach{OUTPUT_SUFFIX}.xlsx")
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     
@@ -846,14 +958,15 @@ def validate():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fencing Camp Schedule Generator")
     parser.add_argument("--step1", action="store_true", help="Generate initial SummerCamp_Schedule.xlsx from Aug_shenzhen.xlsx")
+    parser.add_argument("--step1_one_class_per_student", action="store_true", help="Generate schedule with max 1 class per student per day (any coach type)")
     parser.add_argument("--step2", action="store_true", help="Generate final coach/kid reports from SummerCamp_Schedule.xlsx (respects manual edits)")
     parser.add_argument("--max-main", type=int, default=DEFAULT_MAX_MAIN_LESSONS, help=f"Max lessons allowed for a Main Coach request (default: {DEFAULT_MAX_MAIN_LESSONS})")
     args = parser.parse_args()
 
     random.seed(42)
     
-    if not args.step1 and not args.step2:
-        print("Please specify --step1 or --step2. (Example: python3 schedule_generator.py --step1)")
+    if not args.step1 and not args.step1_one_class_per_student and not args.step2:
+        print("Please specify --step1, --step1_one_class_per_student, or --step2.")
         sys.exit(0)
 
     if args.step1:
@@ -863,6 +976,17 @@ if __name__ == "__main__":
         
         write_excel()
         print("\nStep 1 Complete! You can now edit SummerCamp_Schedule.xlsx if needed.")
+
+    if args.step1_one_class_per_student:
+        OUTPUT_SUFFIX = "_ocps"
+        print("\n>>> STEP 1 (ONE CLASS PER STUDENT PER DAY): GENERATING SCHEDULE <<<")
+        requests = build_schedule_one_class_per_day(shuffle_slots=False, max_main=args.max_main)
+        validate()
+        
+        write_excel()
+        print("\nStep 1 Complete! (one class per student per day mode)")
+        print("You can now edit output/SummerCamp_Schedule_ocps.xlsx if needed.")
+
 
     if args.step2:
         print("\n>>> STEP 2: GENERATING FINAL REPORTS FROM EXCEL <<<")
